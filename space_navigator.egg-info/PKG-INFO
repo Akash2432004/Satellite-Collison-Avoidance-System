@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: space_navigator
+Version: 1.0
+Summary: Space Navigator - a tool, for spacecraft collision avoidance using RL.
+Home-page: https://github.com/yandexdataschool/satellite-collision-avoidance/
+License: MIT
+Keywords: machine learning,reinforcement learning,collision avoidance,spacecraft
+Requires-Dist: pykep==2.1
+Requires-Dist: pandas>=0.20.3
+Requires-Dist: matplotlib>=2.1.0
+Requires-Dist: numpy>=1.14.2
+Requires-Dist: scipy>=1.0.1
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: summary

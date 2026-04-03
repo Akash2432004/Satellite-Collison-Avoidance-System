@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Satellite Collision Avoidance</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:#1a1a2e; color:#e0e0e0; font-family:'Segoe UI',sans-serif; height:100vh; display:flex; flex-direction:column; }
+
+        header {
+            background:#16213e;
+            padding:10px 20px;
+            display:flex;
+            align-items:center;
+            border-bottom:1px solid #0f3460;
+            flex-shrink:0;
+        }
+        header h1 { font-size:1rem; color:#e0e0e0; font-weight:500; letter-spacing:1px; }
+        #timestamp { margin-left:auto; font-size:0.75rem; color:#888; }
+
+        .info-bar {
+            background:#16213e;
+            padding:8px 20px;
+            font-size:0.75rem;
+            color:#aaa;
+            border-bottom:1px solid #0f3460;
+            flex-shrink:0;
+        }
+        .info-bar span { margin-right:24px; }
+        .info-bar .label { color:#888; }
+        .info-bar .val { color:#e0e0e0; margin-left:4px; }
+
+        .content {
+            display:grid;
+            grid-template-columns:1fr 420px;
+            flex:1;
+            min-height:0;
+        }
+
+        #globe { width:100%; height:100%; }
+
+        .charts-panel {
+            background:#16213e;
+            border-left:1px solid #0f3460;
+            display:flex;
+            flex-direction:column;
+            overflow:hidden;
+        }
+        .chart-box {
+            flex:1;
+            border-bottom:1px solid #0f3460;
+            padding:4px 8px 0;
+        }
+        .chart-box:last-child { border-bottom:none; }
+        .chart-title {
+            font-size:0.7rem;
+            color:#aaa;
+            text-align:center;
+            margin-bottom:2px;
+        }
+        .chart-plot { width:100%; height:calc(100% - 18px); }
+
+        #status {
+            position:fixed;
+            bottom:12px;
+            left:12px;
+            font-size:0.72rem;
+            color:#888;
+            background:rgba(22,33,62,0.9);
+            padding:4px 10px;
+            border-radius:4px;
+            border:1px solid #0f3460;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Satellite Collision Avoidance — Live Orbital Tracking</h1>
+    <div id="timestamp">Connecting...</div>
+</header>
+
+<div class="info-bar">
+    <span><span class="label">Epoch:</span><span class="val" id="epoch">—</span></span>
+    <span><span class="label">Stations:</span><span class="val" id="sat-count">—</span></span>
+    <span><span class="label">Debris:</span><span class="val" id="debris-count">—</span></span>
+    <span><span class="label">Total Objects:</span><span class="val" id="total-count">—</span></span>
+</div>
+
+<div class="content">
+    <div id="globe"></div>
+    <div class="charts-panel">
+        <div class="chart-box">
+            <div class="chart-title">Total Collision Probability</div>
+            <div class="chart-plot" id="chart-prob"></div>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Total Fuel Consumption</div>
+            <div class="chart-plot" id="chart-fuel"></div>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Trajectory Deviation Coefficient</div>
+            <div class="chart-plot" id="chart-traj"></div>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Total Reward</div>
+            <div class="chart-plot" id="chart-reward"></div>
+        </div>
+    </div>
+</div>
+
+<div id="status">Initializing...</div>
+
+<script>
+const EARTH_RADIUS = 6371000;
+const COLORS = ["#000000","#ff2222","#cccc00","#00cccc","#2244ff","#ff44ff","#ff8800","#00ff88","#aa44ff","#ffffff"];
+
+function buildEarth() {
+    const N=40;
+    const u=Array.from({length:N+1},(_,i)=>i*2*Math.PI/N);
+    const v=Array.from({length:N+1},(_,j)=>j*Math.PI/N);
+    const x=[],y=[],z=[];
+    for(let i=0;i<=N;i++){
+        const xr=[],yr=[],zr=[];
+        for(let j=0;j<=N;j++){
+            xr.push(EARTH_RADIUS*Math.cos(u[i])*Math.sin(v[j]));
+            yr.push(EARTH_RADIUS*Math.sin(u[i])*Math.sin(v[j]));
+            zr.push(EARTH_RADIUS*Math.cos(v[j]));
+        }
+        x.push(xr);y.push(yr);z.push(zr);
+    }
+    return {
+        type:"surface",x,y,z,
+        colorscale:[[0,"#1a3a6a"],[0.5,"#2a5aaa"],[1,"#4a7acc"]],
+        opacity:0.5,showscale:false,name:"Earth",hoverinfo:"skip"
+    };
+}
+
+const globeLayout = {
+    paper_bgcolor:"#1a1a2e",
+    plot_bgcolor:"#1a1a2e",
+    margin:{l:0,r:0,t:0,b:0},
+    scene:{
+        bgcolor:"#1a1a2e",
+        xaxis:{showgrid:true,gridcolor:"#2a2a4a",zeroline:false,showticklabels:true,tickfont:{color:"#555",size:8},title:""},
+        yaxis:{showgrid:true,gridcolor:"#2a2a4a",zeroline:false,showticklabels:true,tickfont:{color:"#555",size:8},title:""},
+        zaxis:{showgrid:true,gridcolor:"#2a2a4a",zeroline:false,showticklabels:true,tickfont:{color:"#555",size:8},title:""},
+        camera:{eye:{x:1.4,y:1.4,z:0.8}}
+    },
+    legend:{
+        bgcolor:"rgba(22,33,62,0.85)",
+        font:{color:"#cccccc",size:9},
+        bordercolor:"#0f3460",
+        borderwidth:1,
+        x:0.01, y:0.99,
+        xanchor:"left",
+        yanchor:"top"
+    },
+    showlegend:true
+};
+
+const chartLayout = (ylabel) => ({
+    paper_bgcolor:"#16213e",
+    plot_bgcolor:"#16213e",
+    margin:{l:40,r:8,t:4,b:24},
+    xaxis:{
+        color:"#666",gridcolor:"#2a2a4a",tickfont:{size:8},
+        title:{text:"time (mjd2000)",font:{size:8,color:"#666"}}
+    },
+    yaxis:{
+        color:"#666",gridcolor:"#2a2a4a",tickfont:{size:8},
+        title:{text:ylabel,font:{size:8,color:"#666"}}
+    },
+    font:{color:"#aaa",size:8}
+});
+
+// Simulated chart data (will update with real sim data later)
+let timeData = [0];
+let probData = [0];
+let fuelData = [0];
+let trajData = [0];
+let rewardData = [-0.0000454];
+
+function initCharts() {
+    const cfg = {responsive:true, displaylogo:false, displayModeBar:false};
+    Plotly.newPlot("chart-prob",[{x:timeData,y:probData,type:"scatter",mode:"lines",line:{color:"#4a90d9",width:1.5},fill:"tozeroy",fillcolor:"rgba(74,144,217,0.1)"}],chartLayout("prob"),cfg);
+    Plotly.newPlot("chart-fuel",[{x:timeData,y:fuelData,type:"scatter",mode:"lines",line:{color:"#4a90d9",width:1.5},fill:"tozeroy",fillcolor:"rgba(74,144,217,0.1)"}],chartLayout("fuel (dV)"),cfg);
+    Plotly.newPlot("chart-traj",[{x:timeData,y:trajData,type:"scatter",mode:"lines",line:{color:"#4a90d9",width:1.5},fill:"tozeroy",fillcolor:"rgba(74,144,217,0.1)"}],chartLayout("traj dev coef"),cfg);
+    Plotly.newPlot("chart-reward",[{x:timeData,y:rewardData,type:"scatter",mode:"lines",line:{color:"#4a90d9",width:1.5}}],chartLayout("reward"),cfg);
+}
+
+function initGlobe(){
+    Plotly.newPlot("globe",[buildEarth()],globeLayout,{responsive:true,displaylogo:false});
+}
+
+async function loadData(){
+    document.getElementById("status").textContent = "Fetching live data...";
+    try {
+        const res = await fetch("/api/satellites");
+        const data = await res.json();
+        if(data.error) throw new Error(data.error);
+
+        const traces = [buildEarth()];
+        const stations = data.satellites.filter(s=>s.type==="station");
+        const debris = data.satellites.filter(s=>s.type==="debris");
+        const all = [...stations, ...debris];
+
+        all.forEach((sat,i)=>{
+            const color = COLORS[i % COLORS.length];
+            const isStation = sat.type==="station";
+            const now = new Date(data.timestamp);
+            const epochStr = now.toISOString().replace("T"," ").substring(0,19);
+
+            traces.push({
+                type:"scatter3d",
+                x:sat.orbit.x, y:sat.orbit.y, z:sat.orbit.z,
+                mode:"lines",
+                line:{color, width: isStation ? 2 : 1.5},
+                name:`${sat.name}`,
+                hoverinfo:"name",
+                legendgroup: sat.name
+            });
+            traces.push({
+                type:"scatter3d",
+                x:[sat.position[0]], y:[sat.position[1]], z:[sat.position[2]],
+                mode:"markers",
+                marker:{size: isStation ? 6 : 4, color},
+                showlegend:false,
+                hovertext:sat.name,
+                hoverinfo:"text",
+                legendgroup:sat.name
+            });
+        });
+
+        const now = new Date(data.timestamp);
+        document.getElementById("epoch").textContent = now.toUTCString();
+        document.getElementById("sat-count").textContent = stations.length;
+        document.getElementById("debris-count").textContent = debris.length;
+        document.getElementById("total-count").textContent = all.length;
+        document.getElementById("timestamp").textContent = now.toUTCString();
+
+        Plotly.react("globe", traces, globeLayout, {responsive:true,displaylogo:false});
+        document.getElementById("status").textContent = `Live — ${all.length} objects tracked`;
+
+    } catch(e) {
+        document.getElementById("status").textContent = "Error: " + e.message;
+    }
+}
+
+initGlobe();
+initCharts();
+loadData();
+setInterval(loadData, 30000);
+</script>
+</body>
+</html>
